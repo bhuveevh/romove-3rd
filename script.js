@@ -1,76 +1,38 @@
-// DOM elements
-const fileInput = document.getElementById('fileInput');
-const dropArea = document.getElementById('dropArea');
-const processBtn = document.getElementById('processBtn');
-const downloadBtn = document.getElementById('downloadBtn');
-const originalCanvas = document.getElementById('originalCanvas');
-const resultCanvas = document.getElementById('resultCanvas');
-const sizeSelect = document.getElementById('sizeSelect');
+// DOM elements (same as before)
+// ...
 
-// Canvas contexts
-const originalCtx = originalCanvas.getContext('2d');
-const resultCtx = resultCanvas.getContext('2d');
+// Add loading indicators
+const loadingIndicator = document.createElement('div');
+loadingIndicator.className = 'loading';
+loadingIndicator.textContent = 'Processing...';
+document.body.appendChild(loadingIndicator);
 
-let originalImage = null;
-let processedImage = null;
-
-// Event listeners
-dropArea.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', handleFileSelect);
-dropArea.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropArea.style.background = '#f0f0f0';
-});
-dropArea.addEventListener('dragleave', () => {
-    dropArea.style.background = '';
-});
-dropArea.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropArea.style.background = '';
-    if (e.dataTransfer.files.length) {
-        fileInput.files = e.dataTransfer.files;
-        handleFileSelect({ target: fileInput });
-    }
-});
-processBtn.addEventListener('click', processImage);
-downloadBtn.addEventListener('click', downloadImage);
-
-// Handle file selection
-function handleFileSelect(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        originalImage = new Image();
-        originalImage.onload = function() {
-            // Display original image
-            originalCanvas.width = originalImage.width;
-            originalCanvas.height = originalImage.height;
-            originalCtx.drawImage(originalImage, 0, 0);
-            
-            // Enable process button
-            processBtn.disabled = false;
-            downloadBtn.disabled = true;
-        };
-        originalImage.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-}
-
-// Process image (background removal + passport size)
+// Enhanced error handling
 async function processImage() {
     if (!originalImage) return;
     
     processBtn.disabled = true;
     processBtn.textContent = 'Processing...';
+    loadingIndicator.style.display = 'block';
     
     try {
-        // Step 1: Remove background using client-side removal library
-        const bgRemoved = await removeBackground(originalImage);
+        // Step 1: Remove background with fallback
+        let bgRemoved;
+        try {
+            bgRemoved = await removeBackground(originalImage);
+        } catch (bgError) {
+            console.warn('Background removal failed, using original image', bgError);
+            bgRemoved = originalImage;
+        }
         
-        // Step 2: Detect and center face
-        const faceCentered = await centerFace(bgRemoved);
+        // Step 2: Detect and center face with fallback
+        let faceCentered;
+        try {
+            faceCentered = await centerFace(bgRemoved);
+        } catch (faceError) {
+            console.warn('Face detection failed, using original composition', faceError);
+            faceCentered = bgRemoved;
+        }
         
         // Step 3: Resize to passport size
         processedImage = resizeToPassportSize(faceCentered);
@@ -83,147 +45,118 @@ async function processImage() {
         downloadBtn.disabled = false;
     } catch (error) {
         console.error('Error processing image:', error);
-        alert('Error processing image. Please try another photo.');
+        showError('Error processing image. Please try another photo or check the console for details.');
+    } finally {
+        processBtn.textContent = 'Process Photo';
+        processBtn.disabled = false;
+        loadingIndicator.style.display = 'none';
     }
-    
-    processBtn.textContent = 'Process Photo';
-    processBtn.disabled = false;
 }
 
-// Background removal using client-side library
+// Improved background removal with multiple fallbacks
 async function removeBackground(image) {
-    return new Promise((resolve) => {
-        // Using removal.js library (client-side alternative to remove.bg)
+    return new Promise((resolve, reject) => {
         const canvas = document.createElement('canvas');
         canvas.width = image.width;
         canvas.height = image.height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(image, 0, 0);
         
-        // Simple background removal (for better results you might need a more sophisticated approach)
-        removal(canvas, {
-            returnCanvas: true,
-            bgColor: [255, 255, 255, 255], // white background
-            success: function(resultCanvas) {
-                const resultImage = new Image();
-                resultImage.onload = function() {
-                    resolve(resultImage);
-                };
-                resultImage.src = resultCanvas.toDataURL();
-            }
-        });
+        // Try removal.js first
+        if (typeof removal !== 'undefined') {
+            removal(canvas, {
+                returnCanvas: true,
+                bgColor: [255, 255, 255, 255],
+                success: function(resultCanvas) {
+                    const resultImage = new Image();
+                    resultImage.onload = () => resolve(resultImage);
+                    resultImage.onerror = () => reject(new Error('removal.js failed'));
+                    resultImage.src = resultCanvas.toDataURL();
+                },
+                error: () => {
+                    // Fallback to manual background removal
+                    manualBackgroundRemoval(canvas)
+                        .then(resolve)
+                        .catch(reject);
+                }
+            });
+        } else {
+            // Fallback if removal.js not loaded
+            manualBackgroundRemoval(canvas)
+                .then(resolve)
+                .catch(reject);
+        }
     });
 }
 
-// Face detection and centering
-async function centerFace(image) {
-    // Load blazeface model
-    const model = await blazeface.load();
-    
-    // Convert image to tensor
-    const imgTensor = tf.browser.fromPixels(image);
-    const predictions = await model.estimateFaces(imgTensor, false);
-    
-    if (predictions.length > 0) {
-        // Get the first face prediction
-        const face = predictions[0];
+// Simple manual background removal fallback
+function manualBackgroundRemoval(canvas) {
+    return new Promise((resolve) => {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = canvas.width;
+        tempCanvas.height = canvas.height;
+        const tempCtx = tempCanvas.getContext('2d');
         
-        // Create canvas for centered face
-        const canvas = document.createElement('canvas');
-        canvas.width = image.width;
-        canvas.height = image.height;
-        const ctx = canvas.getContext('2d');
+        // This is a very basic background removal - works best with solid color backgrounds
+        tempCtx.drawImage(canvas, 0, 0);
+        const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        const data = imageData.data;
         
-        // Calculate face center and desired position
-        const faceWidth = face.topRight[0] - face.topLeft[0];
-        const faceHeight = face.bottomLeft[1] - face.topLeft[1];
-        const faceCenterX = face.topLeft[0] + faceWidth / 2;
-        const faceCenterY = face.topLeft[1] + faceHeight / 2;
+        // Sample: remove white-ish backgrounds
+        for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i+1];
+            const b = data[i+2];
+            
+            // If pixel is white/light, make it transparent
+            if (r > 200 && g > 200 && b > 200) {
+                data[i+3] = 0; // Set alpha to 0
+            }
+        }
         
-        // Calculate offset to center face in image
-        const offsetX = canvas.width / 2 - faceCenterX;
-        const offsetY = canvas.height / 3 - faceCenterY; // 1/3 from top is standard for passport
+        tempCtx.putImageData(imageData, 0, 0);
         
-        // Draw image with offset
-        ctx.drawImage(image, offsetX, offsetY);
-        
-        const result = new Image();
-        result.src = canvas.toDataURL();
-        return result;
-    }
-    
-    // If no face detected, return original
-    return image;
+        const resultImage = new Image();
+        resultImage.onload = () => resolve(resultImage);
+        resultImage.src = tempCanvas.toDataURL();
+    });
 }
 
-// Resize to passport size based on selection
-function resizeToPassportSize(image) {
-    const size = sizeSelect.value;
-    let width, height;
+// Error display function
+function showError(message) {
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'error-message';
+    errorDiv.textContent = message;
+    document.body.appendChild(errorDiv);
     
-    switch(size) {
-        case '2x2':
-            // 2x2 inches at 300 DPI
-            width = 600;
-            height = 600;
-            break;
-        case '35x45':
-            // 35x45 mm at 300 DPI (~413x531 pixels)
-            width = 413;
-            height = 531;
-            break;
-        case '35x35':
-            // 35x35 mm at 300 DPI (~413x413 pixels)
-            width = 413;
-            height = 413;
-            break;
-        default:
-            width = 600;
-            height = 600;
-    }
-    
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    
-    // Fill with white background
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, width, height);
-    
-    // Calculate aspect ratio and draw image centered
-    const imgAspect = image.width / image.height;
-    const targetAspect = width / height;
-    
-    let drawWidth, drawHeight, offsetX, offsetY;
-    
-    if (imgAspect > targetAspect) {
-        // Image is wider than target
-        drawHeight = height;
-        drawWidth = height * imgAspect;
-        offsetX = (width - drawWidth) / 2;
-        offsetY = 0;
-    } else {
-        // Image is taller than target
-        drawWidth = width;
-        drawHeight = width / imgAspect;
-        offsetX = 0;
-        offsetY = (height - drawHeight) / 2;
-    }
-    
-    ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
-    
-    const result = new Image();
-    result.src = canvas.toDataURL();
-    return result;
+    setTimeout(() => {
+        errorDiv.remove();
+    }, 5000);
 }
 
-// Download processed image
-function downloadImage() {
-    if (!processedImage) return;
-    
-    const link = document.createElement('a');
-    link.download = 'passport-photo.png';
-    link.href = resultCanvas.toDataURL('image/png');
-    link.click();
+// Add to style.css
+.error-message {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #ff4444;
+    color: white;
+    padding: 10px 20px;
+    border-radius: 5px;
+    z-index: 1000;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+}
+
+.loading {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #4CAF50;
+    color: white;
+    padding: 10px 20px;
+    border-radius: 5px;
+    z-index: 1000;
+    display: none;
 }
