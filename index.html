@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Free Passport Photo Tool</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.0.7/dist/blazeface.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/removal@1.0.3/dist/removal.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Free Passport Photo Tool</h1>
+        <div class="upload-area" id="dropArea">
+            <input type="file" id="fileInput" accept="image/*">
+            <p>Drag & drop your photo or click to browse</p>
+        </div>
+        
+        <div class="controls">
+            <button id="processBtn" disabled>Process Photo</button>
+            <button id="downloadBtn" disabled>Download Passport Photo</button>
+            
+            <div class="size-options">
+                <label>Photo Size:</label>
+                <select id="sizeSelect">
+                    <option value="2x2">2x2 inches (USA)</option>
+                    <option value="35x45">35x45 mm (Europe)</option>
+                    <option value="35x35">35x35 mm (India)</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="result-container">
+            <div class="result-box">
+                <h3>Original Photo</h3>
+                <canvas id="originalCanvas"></canvas>
+            </div>
+            <div class="result-box">
+                <h3>Passport Photo</h3>
+                <canvas id="resultCanvas"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
